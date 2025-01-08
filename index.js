@@ -133,13 +133,13 @@ async function main () {
 
     let idx = 0
     for (const tag of tagsList) {
-      if (prefix) {
-        if (tag.name.indexOf(prefix) === 0) {
-          tag.name = tag.name.replace(prefix, '')
-        } else {
-          continue
-        }
-      }
+      // if (prefix) {
+      //   if (tag.name.indexOf(prefix) === 0) {
+      //     tag.name = tag.name.replace(prefix, '')
+      //   } else {
+      //     continue
+      //   }
+      // }
       if (semver.valid(tag.name)) {
         latestTag = tag
         break
