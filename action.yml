@@ -28,7 +28,7 @@ inputs:
   skipInvalidTags:
     description: If set to true, will skip tags that are not valid semver until it finds a proper one (up to maxTagsFetch from latest).
     required: false
-    default: 'false'
+    default: 'true'
   noVersionBumpBehavior:
     description: Whether to exit with an error, warning or silently when none of the commits result in a version bump. (error, warn, current, patch, silent)
     required: false

@@ -52965,8 +52965,7 @@ async function main () {
     .filter((l) => l !== '')
   const fromTag = core.getInput('fromTag')
   const maxTagsToFetch = _.toSafeInteger(core.getInput('maxTagsToFetch') || 10)
-  const fetchLimit =
-    maxTagsToFetch < 1 || maxTagsToFetch > 100 ? 10 : maxTagsToFetch
+  const fetchLimit = maxTagsToFetch
 
   const bumpTypes = {
     major: core
