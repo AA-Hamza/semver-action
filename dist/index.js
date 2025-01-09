@@ -52958,16 +52958,35 @@ async function main () {
   const noVersionBumpBehavior = core.getInput('noVersionBumpBehavior')
   const noNewCommitBehavior = core.getInput('noNewCommitBehavior')
   const prefix = core.getInput('prefix') || ''
-  const additionalCommits = core.getInput('additionalCommits').split('\n').map(l => l.trim()).filter(l => l !== '')
+  const additionalCommits = core
+    .getInput('additionalCommits')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
   const fromTag = core.getInput('fromTag')
   const maxTagsToFetch = _.toSafeInteger(core.getInput('maxTagsToFetch') || 10)
-  const fetchLimit = (maxTagsToFetch < 1 || maxTagsToFetch > 100) ? 10 : maxTagsToFetch
+  const fetchLimit =
+    maxTagsToFetch < 1 || maxTagsToFetch > 100 ? 10 : maxTagsToFetch
 
   const bumpTypes = {
-    major: core.getInput('majorList').split(',').map(p => p.trim()).filter(p => p),
-    minor: core.getInput('minorList').split(',').map(p => p.trim()).filter(p => p),
-    patch: core.getInput('patchList').split(',').map(p => p.trim()).filter(p => p),
-    patchAll: (core.getInput('patchAll') === true || core.getInput('patchAll') === 'true')
+    major: core
+      .getInput('majorList')
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p),
+    minor: core
+      .getInput('minorList')
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p),
+    patch: core
+      .getInput('patchList')
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p),
+    patchAll:
+      core.getInput('patchAll') === true ||
+      core.getInput('patchAll') === 'true'
   }
 
   function outputVersion (version) {
@@ -52983,53 +53002,88 @@ async function main () {
   let latestTag = null
 
   if (!fromTag) {
-    // GET LATEST + PREVIOUS TAGS
-
-    const tagsRaw = await gh.graphql(`
-      query lastTags (
-        $owner: String!
-        $repo: String!
-        $fetchLimit: Int
-        ) {
-        repository (
-          owner: $owner
-          name: $repo
+    async function fetchAllTags (owner, repo, fetchLimit, prefix, cursor) {
+      if (fetchLimit <= 0) {
+        return []
+      }
+      const query = `
+        query lastTags (
+          $owner: String!
+          $repo: String!
+          $fetchLimit: Int
+          $cursor: String
           ) {
-          refs(
-            first: $fetchLimit
-            refPrefix: "refs/tags/"
-            orderBy: { field: TAG_COMMIT_DATE, direction: DESC }
+          repository (
+            owner: $owner
+            name: $repo
             ) {
-            nodes {
-              name
-              target {
-                oid
+            refs(
+              first: $fetchLimit
+              after: $cursor
+              refPrefix: "refs/tags/${prefix}"
+              orderBy: { field: TAG_COMMIT_DATE, direction: DESC }
+              ) {
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+              edges {
+                node {
+                  name
+                  target {
+                    oid
+                  }
+                }
               }
             }
           }
         }
-      }
-    `,
-    {
-      owner,
-      repo,
-      fetchLimit
-    })
+      `
 
-    const tagsList = _.get(tagsRaw, 'repository.refs.nodes', [])
+      const variables = {
+        owner,
+        repo,
+        fetchLimit: Math.min(fetchLimit, 100),
+        cursor
+      }
+
+      const data = await gh.graphql(query, variables)
+      const tags = data.repository.refs.edges.map((edge) => edge.node)
+      fetchLimit -= tags.length
+
+      if (data.repository.refs.pageInfo.hasNextPage) {
+        const nextCursor = data.repository.refs.pageInfo.endCursor
+
+        return tags.concat(
+          await fetchAllTags(owner, repo, fetchLimit, prefix, nextCursor)
+        )
+      } else {
+        return tags
+      }
+    }
+
+    const tagsRaw = await fetchAllTags(owner, repo, fetchLimit, prefix, null)
+
+    const tagsList = tagsRaw.map((item) => ({
+      name: item.name,
+      target: item.target
+    }))
+
     if (tagsList.length < 1) {
-      return core.setFailed('Couldn\'t find the latest tag. Make sure you have at least one tag created first!')
+      return core.setFailed(
+        "Couldn't find the latest tag. Make sure you have at least one tag created first!"
+      )
     }
 
     let idx = 0
     for (const tag of tagsList) {
-      if (prefix) {
-        if (tag.name.indexOf(prefix) === 0) {
-          tag.name = tag.name.replace(prefix, '')
-        } else {
-          continue
-        }
-      }
+      // if (prefix) {
+      //   if (tag.name.indexOf(prefix) === 0) {
+      //     tag.name = tag.name.replace(prefix, '')
+      //   } else {
+      //     continue
+      //   }
+      // }
       if (semver.valid(tag.name)) {
         latestTag = tag
         break
@@ -53041,9 +53095,15 @@ async function main () {
 
     if (!latestTag) {
       if (prefix) {
-        return core.setFailed(`None of the ${fetchLimit} latest tags are valid semver or match the specified prefix!`)
+        return core.setFailed(
+          `None of the ${fetchLimit} latest tags are valid semver or match the specified prefix!`
+        )
       } else {
-        return core.setFailed(skipInvalidTags ? `None of the ${fetchLimit} latest tags are valid semver!` : 'Latest tag is invalid (does not conform to semver)!')
+        return core.setFailed(
+          skipInvalidTags
+            ? `None of the ${fetchLimit} latest tags are valid semver!`
+            : 'Latest tag is invalid (does not conform to semver)!'
+        )
       }
     }
 
@@ -53051,7 +53111,8 @@ async function main () {
   } else {
     // GET SPECIFIC TAG
 
-    const tagRaw = await gh.graphql(`
+    const tagRaw = await gh.graphql(
+      `
       query singleTag ($owner: String!, $repo: String!, $tag: String!) {
         repository (owner: $owner, name: $repo) {
           ref(qualifiedName: $tag) {
@@ -53062,11 +53123,13 @@ async function main () {
           }
         }
       }
-    `, {
-      owner,
-      repo,
-      tag: `refs/tags/${prefix}${fromTag}`
-    })
+    `,
+      {
+        owner,
+        repo,
+        tag: `refs/tags/${prefix}${fromTag}`
+      }
+    )
 
     latestTag = _.get(tagRaw, 'repository.ref')
 
@@ -53082,8 +53145,6 @@ async function main () {
 
     core.info(`Comparing against provided tag: ${prefix}${latestTag.name}`)
   }
-
-  // OUTPUT CURRENT VARS
 
   core.exportVariable('current', `${prefix}${latestTag.name}`)
   core.setOutput('current', `${prefix}${latestTag.name}`)
@@ -53119,18 +53180,18 @@ async function main () {
   if (!commits || commits.length < 1) {
     switch (noNewCommitBehavior) {
       case 'current': {
-        core.info(`Couldn't find any commits between branch HEAD and latest tag. Exiting with current as next version...`)
+        core.info('Couldn\'t find any commits between branch HEAD and latest tag. Exiting with current as next version...')
         outputVersion(semver.clean(latestTag.name))
         return
       }
       case 'silent': {
-        return core.info(`Couldn't find any commits between branch HEAD and latest tag. Exiting silently...`)
+        return core.info('Couldn\'t find any commits between branch HEAD and latest tag. Exiting silently...')
       }
       case 'warn': {
-        return core.warning(`Couldn't find any commits between branch HEAD and latest tag.`)
+        return core.warning('Couldn\'t find any commits between branch HEAD and latest tag.')
       }
       default: {
-        return core.setFailed(`Couldn't find any commits between branch HEAD and latest tag.`)
+        return core.setFailed('Couldn\'t find any commits between branch HEAD and latest tag.')
       }
     }
   }
